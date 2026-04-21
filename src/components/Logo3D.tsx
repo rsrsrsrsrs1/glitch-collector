@@ -13,16 +13,31 @@ let activeBgHex = DEFAULT_BG_HEX;
 let activeLineHex = DEFAULT_LINE_HEX;
 let activeStripeOpacityBase = 0.35;
 
-// Generate a horizontal-line texture via canvas
-function makeStripeTexture(opacity = 0.35) {
-  const size = 64;
-  const lineSpacing = 4;
+// SQL-ish glyphs to scatter across faces — keeps things abstract but database-y
+type Glyph =
+  | "SELECT"
+  | "JOIN"
+  | "WHERE"
+  | "FROM"
+  | "*"
+  | ";"
+  | "table"
+  | "rows"
+  | "key";
+
+// Generate a horizontal-line texture via canvas, optionally overlaid with a SQL glyph
+function makeStripeTexture(opacity = 0.35, glyph?: Glyph) {
+  const size = 256; // higher res so text reads cleanly
+  const lineSpacing = 14;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, size, size);
-  ctx.strokeStyle = `rgba(${activeLineHex === DEFAULT_LINE_HEX ? '88, 88, 94' : '120, 120, 130'}, ${opacity})`;
+
+  const isDefault = activeLineHex === DEFAULT_LINE_HEX;
+  const lineRgb = isDefault ? "88, 88, 94" : "120, 120, 130";
+  ctx.strokeStyle = `rgba(${lineRgb}, ${opacity})`;
   ctx.lineWidth = 1;
   for (let y = 0; y < size; y += lineSpacing) {
     ctx.beginPath();
@@ -30,12 +45,75 @@ function makeStripeTexture(opacity = 0.35) {
     ctx.lineTo(size, y + 0.5);
     ctx.stroke();
   }
+
+  // Glyph overlay — abstract SQL/table marks
+  if (glyph) {
+    const glyphAlpha = Math.min(1, opacity * 2.4 + 0.15);
+    ctx.fillStyle = `rgba(${lineRgb}, ${glyphAlpha})`;
+    ctx.strokeStyle = `rgba(${lineRgb}, ${glyphAlpha})`;
+    ctx.lineWidth = 2;
+
+    if (glyph === "table" || glyph === "rows") {
+      // Mini table grid
+      const cols = 3;
+      const rows = glyph === "rows" ? 5 : 4;
+      const pad = 48;
+      const w = size - pad * 2;
+      const h = size - pad * 2;
+      const cw = w / cols;
+      const rh = h / rows;
+      ctx.strokeRect(pad, pad, w, h);
+      // header fill
+      ctx.fillStyle = `rgba(${lineRgb}, ${glyphAlpha * 0.55})`;
+      ctx.fillRect(pad, pad, w, rh);
+      ctx.fillStyle = `rgba(${lineRgb}, ${glyphAlpha})`;
+      for (let c = 1; c < cols; c++) {
+        ctx.beginPath();
+        ctx.moveTo(pad + c * cw, pad);
+        ctx.lineTo(pad + c * cw, pad + h);
+        ctx.stroke();
+      }
+      for (let r = 1; r < rows; r++) {
+        ctx.beginPath();
+        ctx.moveTo(pad, pad + r * rh);
+        ctx.lineTo(pad + w, pad + r * rh);
+        ctx.stroke();
+      }
+    } else if (glyph === "key") {
+      // Primary-key style: circle + shaft + teeth
+      const cx = size * 0.38;
+      const cy = size * 0.5;
+      const r = 28;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx + r, cy);
+      ctx.lineTo(size - 40, cy);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(size - 70, cy);
+      ctx.lineTo(size - 70, cy + 18);
+      ctx.moveTo(size - 50, cy);
+      ctx.lineTo(size - 50, cy + 12);
+      ctx.stroke();
+    } else {
+      // Text glyphs: SELECT / JOIN / WHERE / FROM / * / ;
+      const isSymbol = glyph === "*" || glyph === ";";
+      ctx.font = `${isSymbol ? 700 : 600} ${isSymbol ? 140 : 44}px ui-monospace, "SF Mono", Menlo, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(glyph, size / 2, size / 2);
+    }
+  }
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(1, 1);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipMapLinearFilter;
+  tex.generateMipmaps = true;
   return tex;
 }
 
@@ -63,19 +141,21 @@ function SlowSpin({ children }: { children: React.ReactNode }) {
   return <group ref={ref}>{children}</group>;
 }
 
-// Helper: a face mesh that uses canvas-based stripes
+// Helper: a face mesh that uses canvas-based stripes (optionally with a SQL glyph)
 function StripeFace({
   position,
   rotation,
   args,
   opacity = 0.35,
+  glyph,
 }: {
   position?: [number, number, number];
   rotation?: [number, number, number];
   args?: [number, number];
   opacity?: number;
+  glyph?: Glyph;
 }) {
-  const texture = useMemo(() => makeStripeTexture(opacity), [opacity]);
+  const texture = useMemo(() => makeStripeTexture(opacity, glyph), [opacity, glyph]);
   return (
     <mesh position={position} rotation={rotation}>
       <planeGeometry args={args || [1.3, 1.3]} />
@@ -84,17 +164,19 @@ function StripeFace({
   );
 }
 
-// Box with stripes on all 6 faces
+// Box with stripes on all 6 faces, optionally with per-face SQL glyphs
 function StripedBox({
   width = 1.3,
   height = 1.3,
   depth = 1.3,
   opacity = 0.25,
+  glyphs,
 }: {
   width?: number;
   height?: number;
   depth?: number;
   opacity?: number;
+  glyphs?: (Glyph | undefined)[];
 }) {
   const hx = width / 2 + 0.01;
   const hy = height / 2 + 0.01;
@@ -110,14 +192,23 @@ function StripedBox({
   return (
     <>
       {faces.map((f, i) => (
-        <StripeFace key={i} position={f.pos} rotation={f.rot} args={f.args} opacity={opacity} />
+        <StripeFace
+          key={i}
+          position={f.pos}
+          rotation={f.rot}
+          args={f.args}
+          opacity={opacity}
+          glyph={glyphs?.[i]}
+        />
       ))}
     </>
   );
 }
 
-// 1. Single cube with one highlighted face
+// 1. Single cube with SQL/database glyphs etched into each face
 function CubeHighlight() {
+  // faces order: front, back, right, left, top, bottom
+  const glyphs: (Glyph | undefined)[] = ["SELECT", "table", "JOIN", "key", "*", "WHERE"];
   return (
     <SlowSpin>
       <group rotation={[Math.PI * 0.15, Math.PI * 0.25, 0]}>
@@ -126,7 +217,7 @@ function CubeHighlight() {
           <meshBasicMaterial transparent opacity={0} />
           <Edges lineWidth={LINE_WIDTH} color={activeLineHex} />
         </mesh>
-        <StripedBox width={1.3} height={1.3} depth={1.3} opacity={0.3} />
+        <StripedBox width={1.3} height={1.3} depth={1.3} opacity={0.3} glyphs={glyphs} />
       </group>
     </SlowSpin>
   );
