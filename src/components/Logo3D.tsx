@@ -141,19 +141,21 @@ function SlowSpin({ children }: { children: React.ReactNode }) {
   return <group ref={ref}>{children}</group>;
 }
 
-// Helper: a face mesh that uses canvas-based stripes
+// Helper: a face mesh that uses canvas-based stripes (optionally with a SQL glyph)
 function StripeFace({
   position,
   rotation,
   args,
   opacity = 0.35,
+  glyph,
 }: {
   position?: [number, number, number];
   rotation?: [number, number, number];
   args?: [number, number];
   opacity?: number;
+  glyph?: Glyph;
 }) {
-  const texture = useMemo(() => makeStripeTexture(opacity), [opacity]);
+  const texture = useMemo(() => makeStripeTexture(opacity, glyph), [opacity, glyph]);
   return (
     <mesh position={position} rotation={rotation}>
       <planeGeometry args={args || [1.3, 1.3]} />
@@ -162,17 +164,19 @@ function StripeFace({
   );
 }
 
-// Box with stripes on all 6 faces
+// Box with stripes on all 6 faces, optionally with per-face SQL glyphs
 function StripedBox({
   width = 1.3,
   height = 1.3,
   depth = 1.3,
   opacity = 0.25,
+  glyphs,
 }: {
   width?: number;
   height?: number;
   depth?: number;
   opacity?: number;
+  glyphs?: (Glyph | undefined)[];
 }) {
   const hx = width / 2 + 0.01;
   const hy = height / 2 + 0.01;
@@ -188,14 +192,23 @@ function StripedBox({
   return (
     <>
       {faces.map((f, i) => (
-        <StripeFace key={i} position={f.pos} rotation={f.rot} args={f.args} opacity={opacity} />
+        <StripeFace
+          key={i}
+          position={f.pos}
+          rotation={f.rot}
+          args={f.args}
+          opacity={opacity}
+          glyph={glyphs?.[i]}
+        />
       ))}
     </>
   );
 }
 
-// 1. Single cube with one highlighted face
+// 1. Single cube with SQL/database glyphs etched into each face
 function CubeHighlight() {
+  // faces order: front, back, right, left, top, bottom
+  const glyphs: (Glyph | undefined)[] = ["SELECT", "table", "JOIN", "key", "*", "WHERE"];
   return (
     <SlowSpin>
       <group rotation={[Math.PI * 0.15, Math.PI * 0.25, 0]}>
@@ -204,7 +217,7 @@ function CubeHighlight() {
           <meshBasicMaterial transparent opacity={0} />
           <Edges lineWidth={LINE_WIDTH} color={activeLineHex} />
         </mesh>
-        <StripedBox width={1.3} height={1.3} depth={1.3} opacity={0.3} />
+        <StripedBox width={1.3} height={1.3} depth={1.3} opacity={0.3} glyphs={glyphs} />
       </group>
     </SlowSpin>
   );
